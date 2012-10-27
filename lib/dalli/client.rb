@@ -72,6 +72,27 @@ module Dalli
         end
 
         values = {}
+
+        if @servers_in_use.any?
+          # process servers with results waiting first, (if any)
+          if ret = IO.select(@servers_in_use.map{ |server| server.sock }.compact, nil, nil, 0)
+            ret[0].each do |sock|
+              server = sock.server
+              @servers_in_use.delete(server)
+
+              next unless server.alive?
+              begin
+                server.request(:noop).each_pair do |key, value|
+                  values[key_without_namespace(key)] = value
+                end
+              rescue DalliError, NetworkError => e
+                Dalli.logger.debug { e.inspect }
+                Dalli.logger.debug { "results from this server will be missing" }
+              end
+            end
+          end
+        end
+
         @servers_in_use.each do |server|
           next unless server.alive?
           begin
